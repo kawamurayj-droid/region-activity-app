@@ -234,7 +234,7 @@ function renderDash() {
         ${r.flag ? '<span class="badge">要相談</span>' : ""}
       </div>
       <p>対外交渉(${negCount}件): <span style="color:${statusColorByOptions(NEG_STATUS_OPTIONS, r.negStatus || "未着手")}; font-weight:600;">${r.negStatus || "未着手"}</span></p>
-      <p>次回引率: ${nextShift ? nextShift.d + " " + nextShift.who : "未定"}</p>
+      <p>次回引率: ${nextShift ? nextShift.d + " " + nextShift.who + (nextShift.text ? "（" + nextShift.text + "）" : "") : "未定"}</p>
       <p>学生指導(${guideCount}件): <span style="color:${statusColorByOptions(GUIDE_STATUS_OPTIONS, r.guideStatus || "未実施")}; font-weight:600;">${r.guideStatus || "未実施"}</span></p>
     </div>`;
   });
@@ -313,11 +313,12 @@ function renderDetail(id) {
 
     <div class="section">
       <p style="font-size:13px; color:#666;">引率シフト</p>
-      <div>${listBlock(id, "shift", r.shift, e => `${e.d} ／ ${e.who}`)}</div>
+      <div>${listBlock(id, "shift", r.shift, e => `${e.d} ／ ${e.who}${e.text ? " ／ " + e.text : ""}`)}</div>
       <div class="form-row">
         <input id="shift-date" type="date" style="width:150px;">
         <input id="shift-who" placeholder="担当者" value="${myName}" style="width:90px;">
-        <button onclick="addEntry('${id}','shift',['shift-date','shift-who'])">追加</button>
+        <input id="shift-text" placeholder="内容" style="flex:1; min-width:160px;">
+        <button onclick="addEntry('${id}','shift',['shift-date','shift-who','shift-text'])">追加</button>
       </div>
       <p id="shift-error" class="error-text" style="display:none;"></p>
     </div>
@@ -366,11 +367,9 @@ function updateFlag(id, val) {
 function addEntry(regionId, field, inputIds) {
   const values = inputIds.map(iid => document.getElementById(iid).value.trim());
   const entry = { ts: Date.now() };
-  if (field === "shift") {
-    entry.d = values[0]; entry.who = values[1];
-  } else {
-    entry.d = values[0]; entry.who = values[1]; entry.text = values[2];
-  }
+  entry.d = values[0];
+  entry.who = values[1];
+  if (values.length > 2) entry.text = values[2];
   db.ref("regions/" + regionId + "/" + field).push(entry);
   inputIds.forEach(iid => { if (!iid.endsWith("-who")) document.getElementById(iid).value = ""; });
 }
@@ -450,7 +449,7 @@ function renderShiftOverview() {
   Object.keys(regionsData).forEach(id => {
     const r = regionsData[id];
     entriesArr(r.shift).forEach(e => {
-      if (e.d) all.push({ region: r.name, date: e.d, who: e.who });
+      if (e.d) all.push({ region: r.name, date: e.d, who: e.who, text: e.text });
     });
   });
   const byDate = {};
@@ -467,7 +466,7 @@ function renderShiftOverview() {
       html += `<div class="section" style="margin-bottom:0; ${conflict ? "border:2px solid #d85a30;" : ""}">
         <p style="font-weight:600; font-size:14px; margin:0 0 4px;">${date} ${conflict ? '<span class="badge">重複あり</span>' : ""}</p>`;
       entries.forEach(e => {
-        html += `<p class="entry">${e.region} ／ ${e.who}</p>`;
+        html += `<p class="entry">${e.region} ／ ${e.who}${e.text ? " ／ " + e.text : ""}</p>`;
       });
       html += "</div>";
     });
