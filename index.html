@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>地域活動管理アプリ</title>
+<style>
+  body { font-family: -apple-system, "Hiragino Sans", sans-serif; background:#f5f5f2; margin:0; padding:0; color:#222; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+  #login-screen { display:flex; flex-direction:column; align-items:center; justify-content:center; height:80vh; gap:16px; }
+  #login-screen button { font-size:15px; padding:10px 20px; cursor:pointer; }
+  #app { display:none; }
+  header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+  header h1 { font-size:18px; margin:0; }
+  #user-info { font-size:13px; color:#666; display:flex; gap:10px; align-items:center; }
+  #user-info button { font-size:12px; padding:4px 10px; cursor:pointer; }
+  nav { display:flex; gap:8px; margin-bottom:16px; border-bottom:1px solid #ddd; padding-bottom:8px; }
+  nav button { font-size:13px; padding:6px 12px; cursor:pointer; background:transparent; border:1px solid #ccc; border-radius:6px; }
+  nav button.active { background:#fff; border-color:#888; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; }
+  .card { background:#fff; border:1px solid #ddd; border-radius:12px; padding:16px; cursor:pointer; }
+  .card.flag { border:2px solid #d85a30; }
+  .card p { margin:4px 0; font-size:13px; color:#555; }
+  .card .title { font-weight:600; font-size:15px; margin-bottom:8px; color:#111; }
+  .badge { background:#faece7; color:#712b13; font-size:11px; padding:2px 8px; border-radius:6px; }
+  .section { background:#fff; border-radius:10px; padding:16px; margin-bottom:14px; border:1px solid #eee; }
+  .section p.entry { font-size:13px; margin:0 0 4px; }
+  .form-row { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
+  .form-row input, .form-row select { font-size:13px; padding:6px 8px; border:1px solid #ccc; border-radius:6px; }
+  .form-row button { font-size:13px; padding:6px 12px; cursor:pointer; border:1px solid #888; border-radius:6px; background:#fff; }
+  .error-text { font-size:12px; color:#c0392b; margin:4px 0 0; }
+  .name-edit { font-size:15px; font-weight:600; border:none; border-bottom:1px dashed #ccc; background:transparent; width:100%; margin-bottom:6px; }
+  select#status-select { margin-left:8px; }
+  label.flagcheck { font-size:13px; margin-left:12px; }
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <h2>地域活動管理アプリ</h2>
+  <p style="color:#666; font-size:14px;">NBU学内Googleアカウントでログインしてください</p>
+  <button id="login-btn">Googleでログイン</button>
+  <p id="login-error" class="error-text" style="display:none;"></p>
+</div>
+
+<div id="app">
+  <div class="wrap">
+    <header>
+      <h1>地域活動管理アプリ</h1>
+      <div id="user-info"></div>
+    </header>
+    <nav>
+      <button id="tab-dash" class="active">ダッシュボード</button>
+      <button id="tab-detail">地域別詳細</button>
+      <button id="tab-meeting">打ち合わせ用まとめ</button>
+    </nav>
+    <div id="panel-dash"></div>
+    <div id="panel-detail" style="display:none;">
+      <select id="region-select" style="margin-bottom:12px; padding:6px;"></select>
+      <div id="detail-content"></div>
+    </div>
+    <div id="panel-meeting" style="display:none;"></div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+<script>
+// ==== Firebase設定 ====
+const firebaseConfig = {
+  apiKey: "AIzaSyDQP6MiqWlOUP_HQkArVNZiSXrDG6rQEYw",
+  authDomain: "region-activity-app.firebaseapp.com",
+  databaseURL: "https://region-activity-app-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "region-activity-app",
+  storageBucket: "region-activity-app.firebasestorage.app",
+  messagingSenderId: "168285058586",
+  appId: "1:168285058586:web:098207c2a270336e3203a3"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.database();
+const provider = new firebase.auth.GoogleAuthProvider();
+provider.setCustomParameters({ hd: "nbu.ac.jp" });
+
+// ==== 許可する教員のメールアドレス（ここに実際の4名分を入力してください） ====
+const ALLOWED_EMAILS = [
+  "kawamura@nbu.ac.jp",   // 河村 ※実際のアドレスに置き換えてください
+  "otani@nbu.ac.jp",      // 大谷 ※実際のアドレスに置き換えてください
+  "hashimoto@nbu.ac.jp",  // 橋本 ※実際のアドレスに置き換えてください
+  "nabeta@nbu.ac.jp"      // 鍋田 ※実際のアドレスに置き換えてください
+];
+
+document.getElementById("login-btn").onclick = () => {
+  auth.signInWithPopup(provider).catch(err => {
+    document.getElementById("login-error").textContent = "ログインに失敗しました: " + err.message;
+    document.getElementById("login-error").style.display = "block";
+  });
+};
+
+auth.onAuthStateChanged(user => {
+  const errEl = document.getElementById("login-error");
+  if (!user) {
+    document.getElementById("login-screen").style.display = "flex";
+    document.getElementById("app").style.display = "none";
+    return;
+  }
+  const email = user.email || "";
+  const okDomain = email.endsWith("@nbu.ac.jp");
+  const okAllowed = ALLOWED_EMAILS.includes(email);
+  if (!okDomain || !okAllowed) {
+    errEl.textContent = "このアプリの利用が許可されていないアカウントです（" + email + "）";
+    errEl.style.display = "block";
+    auth.signOut();
+    return;
+  }
+  errEl.style.display = "none";
+  document.getElementById("login-screen").style.display = "none";
+  document.getElementById("app").style.display = "block";
+  document.getElementById("user-info").innerHTML =
+    email + ' <button id="logout-btn">ログアウト</button>';
+  document.getElementById("logout-btn").onclick = () => auth.signOut();
+  initApp();
+});
+
+// ==== アプリ本体 ====
+let regionsData = {};
+let currentRegion = null;
+let appInitialized = false;
+
+function initApp() {
+  if (appInitialized) return;
+  appInitialized = true;
+
+  const regionsRef = db.ref("regions");
+  regionsRef.once("value").then(snap => {
+    if (!snap.exists()) {
+      const seed = {};
+      for (let i = 1; i <= 8; i++) {
+        seed["r" + i] = { name: "地域" + i, status: "未着手", flag: false };
+      }
+      regionsRef.set(seed);
+    }
+  });
+
+  regionsRef.on("value", snap => {
+    regionsData = snap.val() || {};
+    renderDash();
+    renderMeeting();
+    if (currentRegion && regionsData[currentRegion]) renderDetail(currentRegion);
+  });
+
+  document.getElementById("tab-dash").onclick = () => showTab("dash");
+  document.getElementById("tab-detail").onclick = () => showTab("detail");
+  document.getElementById("tab-meeting").onclick = () => showTab("meeting");
+  document.getElementById("region-select").onchange = e => renderDetail(e.target.value);
+}
+
+function statusColor(s) {
+  if (s === "合意済") return "#0f6e56";
+  if (s === "調整中") return "#854f0b";
+  return "#a32d2d";
+}
+
+function entriesArr(obj) {
+  if (!obj) return [];
+  return Object.entries(obj).map(([k, v]) => ({ id: k, ...v })).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+}
+
+function renderDash() {
+  const ids = Object.keys(regionsData).sort();
+  let html = '<div class="grid">';
+  ids.forEach(id => {
+    const r = regionsData[id];
+    const negCount = r.negLog ? Object.keys(r.negLog).length : 0;
+    const guideCount = r.guide ? Object.keys(r.guide).length : 0;
+    const shiftEntries = entriesArr(r.shift);
+    const nextShift = shiftEntries.length ? shiftEntries[shiftEntries.length - 1] : null;
+    html += `<div class="card ${r.flag ? "flag" : ""}" onclick="openDetail('${id}')">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span class="title">${r.name}</span>
+        ${r.flag ? '<span class="badge">要相談</span>' : ""}
+      </div>
+      <p>対外交渉(${negCount}件): <span style="color:${statusColor(r.status)}; font-weight:600;">${r.status}</span></p>
+      <p>次回引率: ${nextShift ? nextShift.d + " " + nextShift.who : "未定"}</p>
+      <p>学生指導: ${guideCount}件</p>
+    </div>`;
+  });
+  html += "</div>";
+  document.getElementById("panel-dash").innerHTML = html;
+
+  const sel = document.getElementById("region-select");
+  const prev = sel.value;
+  sel.innerHTML = ids.map(id => `<option value="${id}">${regionsData[id].name}</option>`).join("");
+  if (ids.includes(prev)) sel.value = prev;
+}
+
+function listBlock(obj, fmt) {
+  const arr = entriesArr(obj);
+  if (arr.length === 0) return '<p class="entry" style="color:#999;">記録なし</p>';
+  return arr.map(e => `<p class="entry">${fmt(e)}</p>`).join("");
+}
+
+function openDetail(id) {
+  showTab("detail");
+  document.getElementById("region-select").value = id;
+  renderDetail(id);
+}
+
+function renderDetail(id) {
+  currentRegion = id;
+  const r = regionsData[id];
+  if (!r) return;
+  let html = `
+    <input class="name-edit" id="region-name" value="${r.name}" onchange="updateName('${id}', this.value)">
+    <div style="margin-bottom:14px;">
+      <select id="status-select" onchange="updateStatus('${id}', this.value)">
+        <option ${r.status === "未着手" ? "selected" : ""}>未着手</option>
+        <option ${r.status === "調整中" ? "selected" : ""}>調整中</option>
+        <option ${r.status === "合意済" ? "selected" : ""}>合意済</option>
+      </select>
+      <label class="flagcheck"><input type="checkbox" ${r.flag ? "checked" : ""} onchange="updateFlag('${id}', this.checked)"> 要相談フラグ</label>
+    </div>
+
+    <div class="section">
+      <p style="font-size:13px; color:#666;">対外交渉ログ</p>
+      <div>${listBlock(r.negLog, e => `${e.d} ／ ${e.who} ／ ${e.text}`)}</div>
+      <div class="form-row">
+        <input id="neg-date" placeholder="日付 例: 9/10" style="width:110px;">
+        <input id="neg-who" placeholder="担当者" style="width:90px;">
+        <input id="neg-text" placeholder="内容" style="flex:1; min-width:160px;">
+        <button onclick="addEntry('${id}','negLog',['neg-date','neg-who','neg-text'])">追加</button>
+      </div>
+      <p id="negLog-error" class="error-text" style="display:none;"></p>
+    </div>
+
+    <div class="section">
+      <p style="font-size:13px; color:#666;">引率シフト</p>
+      <div>${listBlock(r.shift, e => `${e.d} ／ ${e.who}`)}</div>
+      <div class="form-row">
+        <input id="shift-date" placeholder="日付 例: 10/4" style="width:110px;">
+        <input id="shift-who" placeholder="担当者" style="width:90px;">
+        <button onclick="addEntry('${id}','shift',['shift-date','shift-who'])">追加</button>
+      </div>
+      <p id="shift-error" class="error-text" style="display:none;"></p>
+    </div>
+
+    <div class="section">
+      <p style="font-size:13px; color:#666;">学生指導記録</p>
+      <div>${listBlock(r.guide, e => `${e.d} ／ ${e.who} ／ ${e.text}`)}</div>
+      <div class="form-row">
+        <input id="guide-date" placeholder="日付 例: 9/10" style="width:110px;">
+        <input id="guide-who" placeholder="担当者" style="width:90px;">
+        <input id="guide-text" placeholder="内容" style="flex:1; min-width:160px;">
+        <button onclick="addEntry('${id}','guide',['guide-date','guide-who','guide-text'])">追加</button>
+      </div>
+      <p id="guide-error" class="error-text" style="display:none;"></p>
+    </div>
+  `;
+  document.getElementById("detail-content").innerHTML = html;
+}
+
+function updateName(id, val) {
+  if (!val.trim()) return;
+  db.ref("regions/" + id + "/name").set(val.trim());
+}
+function updateStatus(id, val) {
+  db.ref("regions/" + id + "/status").set(val);
+}
+function updateFlag(id, val) {
+  db.ref("regions/" + id + "/flag").set(val);
+}
+
+function addEntry(regionId, field, inputIds) {
+  const values = inputIds.map(iid => document.getElementById(iid).value.trim());
+  if (values.some(v => !v)) {
+    const errId = field + "-error";
+    const errEl = document.getElementById(errId);
+    errEl.textContent = "すべての項目を入力してください";
+    errEl.style.display = "block";
+    return;
+  }
+  const entry = { ts: Date.now() };
+  if (field === "shift") {
+    entry.d = values[0]; entry.who = values[1];
+  } else {
+    entry.d = values[0]; entry.who = values[1]; entry.text = values[2];
+  }
+  db.ref("regions/" + regionId + "/" + field).push(entry);
+  inputIds.forEach(iid => document.getElementById(iid).value = "");
+}
+
+function renderMeeting() {
+  const ids = Object.keys(regionsData).sort().filter(id => regionsData[id].flag);
+  let html = '<p style="font-size:13px; color:#666; margin-bottom:12px;">前回打ち合わせ以降の要対応地域</p>';
+  if (ids.length === 0) {
+    html += '<p style="font-size:13px; color:#999;">現在「要相談」フラグの地域はありません</p>';
+  } else {
+    html += '<div style="display:flex; flex-direction:column; gap:8px;">';
+    ids.forEach(id => {
+      const r = regionsData[id];
+      const negCount = r.negLog ? Object.keys(r.negLog).length : 0;
+      const shiftCount = r.shift ? Object.keys(r.shift).length : 0;
+      const guideCount = r.guide ? Object.keys(r.guide).length : 0;
+      html += `<div class="section" style="margin-bottom:0;">
+        <p style="font-weight:600; font-size:14px; margin:0 0 4px;">${r.name}</p>
+        <p style="font-size:13px; color:#666; margin:0;">対外交渉${negCount}件 ／ 引率シフト${shiftCount}件 ／ 学生指導${guideCount}件</p>
+      </div>`;
+    });
+    html += "</div>";
+  }
+  document.getElementById("panel-meeting").innerHTML = html;
+}
+
+function showTab(name) {
+  ["dash", "detail", "meeting"].forEach(t => {
+    document.getElementById("panel-" + t).style.display = t === name ? "block" : "none";
+    document.getElementById("tab-" + t).classList.toggle("active", t === name);
+  });
+}
+</script>
+</body>
+</html>
