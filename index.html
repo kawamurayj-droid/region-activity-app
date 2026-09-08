@@ -136,6 +136,30 @@ let lastMeetingDate = null;
 let filterMode = false;
 let currentRegion = null;
 let appInitialized = false;
+let editingKey = null;
+let editingMeetingId = null;
+
+const FIELD_CONFIG = {
+  negLog: [
+    { key: "d", type: "text", ph: "日付 例: 9/10", width: "110px" },
+    { key: "who", type: "text", ph: "担当者", width: "90px" },
+    { key: "text", type: "text", ph: "内容", width: "" }
+  ],
+  shift: [
+    { key: "d", type: "date", ph: "", width: "150px" },
+    { key: "who", type: "text", ph: "担当者", width: "90px" },
+    { key: "text", type: "text", ph: "内容", width: "" }
+  ],
+  guide: [
+    { key: "d", type: "text", ph: "日付 例: 9/10", width: "110px" },
+    { key: "who", type: "text", ph: "担当者", width: "90px" },
+    { key: "text", type: "text", ph: "内容", width: "" }
+  ]
+};
+
+function formatEntry(field, e) {
+  return FIELD_CONFIG[field].map(c => e[c.key]).filter(v => v).join(" ／ ");
+}
 
 function initApp() {
   if (appInitialized) return;
@@ -259,10 +283,51 @@ function toggleFilterMode(val) {
   if (currentRegion) renderDetail(currentRegion);
 }
 
-function listBlock(regionId, field, obj, fmt) {
+function listBlock(regionId, field, obj) {
   const arr = visibleEntries(obj);
   if (arr.length === 0) return '<p class="entry" style="color:#999;">記録なし</p>';
-  return arr.map(e => `<div class="entry-row"><p class="entry">${fmt(e)}</p><button class="del-btn" onclick="deleteEntry('${regionId}','${field}','${e.id}')">削除</button></div>`).join("");
+  return arr.map(e => {
+    const key = regionId + ":" + field + ":" + e.id;
+    if (editingKey === key) {
+      const cfg = FIELD_CONFIG[field];
+      const inputs = cfg.map(c => {
+        const style = c.key === "text" ? "flex:1; min-width:160px;" : "width:" + c.width + ";";
+        return `<input id="edit-${field}-${e.id}-${c.key}" type="${c.type}" value="${(e[c.key] || "").replace(/"/g, "&quot;")}" placeholder="${c.ph}" style="${style}">`;
+      }).join("");
+      return `<div class="form-row" style="margin:4px 0;">${inputs}
+        <button onclick="saveEdit('${regionId}','${field}','${e.id}')">保存</button>
+        <button onclick="cancelEdit('${regionId}')">キャンセル</button>
+      </div>`;
+    }
+    return `<div class="entry-row"><p class="entry">${formatEntry(field, e)}</p>
+      <span style="display:flex; gap:2px; flex-shrink:0;">
+        <button class="del-btn" onclick="startEdit('${regionId}','${field}','${e.id}')">修正</button>
+        <button class="del-btn" onclick="deleteEntry('${regionId}','${field}','${e.id}')">削除</button>
+      </span>
+    </div>`;
+  }).join("");
+}
+
+function startEdit(regionId, field, entryId) {
+  editingKey = regionId + ":" + field + ":" + entryId;
+  renderDetail(regionId);
+}
+
+function cancelEdit(regionId) {
+  editingKey = null;
+  renderDetail(regionId);
+}
+
+function saveEdit(regionId, field, entryId) {
+  const cfg = FIELD_CONFIG[field];
+  const updates = {};
+  cfg.forEach(c => {
+    updates[c.key] = document.getElementById(`edit-${field}-${entryId}-${c.key}`).value.trim();
+  });
+  db.ref("regions/" + regionId + "/" + field + "/" + entryId).update(updates).then(() => {
+    editingKey = null;
+    renderDetail(regionId);
+  });
 }
 
 function deleteEntry(regionId, field, entryId) {
@@ -301,7 +366,7 @@ function renderDetail(id) {
           ${NEG_STATUS_OPTIONS.map(o => `<option ${(r.negStatus || "未着手") === o ? "selected" : ""}>${o}</option>`).join("")}
         </select>
       </p>
-      <div>${listBlock(id, "negLog", r.negLog, e => `${e.d} ／ ${e.who} ／ ${e.text}`)}</div>
+      <div>${listBlock(id, "negLog", r.negLog)}</div>
       <div class="form-row">
         <input id="neg-date" placeholder="日付 例: 9/10" style="width:110px;">
         <input id="neg-who" placeholder="担当者" value="${myName}" style="width:90px;">
@@ -313,7 +378,7 @@ function renderDetail(id) {
 
     <div class="section">
       <p style="font-size:13px; color:#666;">引率シフト</p>
-      <div>${listBlock(id, "shift", r.shift, e => `${e.d} ／ ${e.who}${e.text ? " ／ " + e.text : ""}`)}</div>
+      <div>${listBlock(id, "shift", r.shift)}</div>
       <div class="form-row">
         <input id="shift-date" type="date" style="width:150px;">
         <input id="shift-who" placeholder="担当者" value="${myName}" style="width:90px;">
@@ -329,7 +394,7 @@ function renderDetail(id) {
           ${GUIDE_STATUS_OPTIONS.map(o => `<option ${(r.guideStatus || "未実施") === o ? "selected" : ""}>${o}</option>`).join("")}
         </select>
       </p>
-      <div>${listBlock(id, "guide", r.guide, e => `${e.d} ／ ${e.who} ／ ${e.text}`)}</div>
+      <div>${listBlock(id, "guide", r.guide)}</div>
       <div class="form-row">
         <input id="guide-date" placeholder="日付 例: 9/10" style="width:110px;">
         <input id="guide-who" placeholder="担当者" value="${myName}" style="width:90px;">
@@ -409,13 +474,27 @@ function renderMeeting() {
   } else {
     html += '<div style="display:flex; flex-direction:column; gap:10px;">';
     notes.forEach(n => {
-      html += `<div class="section" style="margin-bottom:0;">
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
-          <p style="font-size:12px; color:#999; margin:0 0 4px;">${n.date || ""}</p>
-          <button class="del-btn" onclick="deleteMeetingNote('${n.id}')">削除</button>
-        </div>
-        <p style="font-size:13px; margin:0; white-space:pre-wrap;">${n.text}</p>
-      </div>`;
+      if (editingMeetingId === n.id) {
+        html += `<div class="section" style="margin-bottom:0;">
+          <input id="edit-meeting-date" type="date" value="${n.date || ""}" style="width:160px; margin-bottom:6px;">
+          <textarea id="edit-meeting-text" rows="4" style="width:100%; margin-top:6px; font-family:inherit; font-size:13px; padding:8px; border:1px solid #ccc; border-radius:6px; resize:vertical; box-sizing:border-box;">${n.text || ""}</textarea>
+          <div style="margin-top:6px; display:flex; gap:6px;">
+            <button onclick="saveMeetingEdit('${n.id}')">保存</button>
+            <button onclick="cancelMeetingEdit()">キャンセル</button>
+          </div>
+        </div>`;
+      } else {
+        html += `<div class="section" style="margin-bottom:0;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+            <p style="font-size:12px; color:#999; margin:0 0 4px;">${n.date || ""}</p>
+            <span style="display:flex; gap:2px; flex-shrink:0;">
+              <button class="del-btn" onclick="startMeetingEdit('${n.id}')">修正</button>
+              <button class="del-btn" onclick="deleteMeetingNote('${n.id}')">削除</button>
+            </span>
+          </div>
+          <p style="font-size:13px; margin:0; white-space:pre-wrap;">${n.text}</p>
+        </div>`;
+      }
     });
     html += "</div>";
   }
@@ -425,6 +504,25 @@ function renderMeeting() {
 
 function deleteMeetingNote(noteId) {
   db.ref("meetingNotes/" + noteId).remove();
+}
+
+function startMeetingEdit(noteId) {
+  editingMeetingId = noteId;
+  renderMeeting();
+}
+
+function cancelMeetingEdit() {
+  editingMeetingId = null;
+  renderMeeting();
+}
+
+function saveMeetingEdit(noteId) {
+  const date = document.getElementById("edit-meeting-date").value;
+  const text = document.getElementById("edit-meeting-text").value.trim();
+  db.ref("meetingNotes/" + noteId).update({ date, text }).then(() => {
+    editingMeetingId = null;
+    renderMeeting();
+  });
 }
 
 function addMeetingNote() {
