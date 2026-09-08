@@ -17,12 +17,12 @@
   nav { display:flex; gap:8px; margin-bottom:16px; border-bottom:1px solid #ddd; padding-bottom:8px; }
   nav button { font-size:13px; padding:6px 12px; cursor:pointer; background:transparent; border:1px solid #ccc; border-radius:6px; }
   nav button.active { background:#fff; border-color:#888; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; }
-  .card { background:#fff; border:1px solid #ddd; border-radius:12px; padding:16px; cursor:pointer; }
-  .card.flag { border:2px solid #d85a30; }
-  .card p { margin:4px 0; font-size:13px; color:#555; }
-  .card .title { font-weight:600; font-size:15px; margin-bottom:8px; color:#111; }
-  .badge { background:#faece7; color:#712b13; font-size:11px; padding:2px 8px; border-radius:6px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:16px; }
+  .card { background:#fff; border:1px solid #ddd; border-radius:14px; padding:22px; cursor:pointer; }
+  .card.flag { border:3px solid #d85a30; }
+  .card p { margin:6px 0; font-size:15px; color:#555; }
+  .card .title { font-weight:700; font-size:19px; margin-bottom:12px; color:#111; }
+  .badge { background:#faece7; color:#712b13; font-size:13px; padding:3px 10px; border-radius:8px; }
   .section { background:#fff; border-radius:10px; padding:16px; margin-bottom:14px; border:1px solid #eee; }
   .section p.entry { font-size:13px; margin:0 0 4px; }
   .form-row { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
@@ -196,6 +196,16 @@ function visibleEntries(obj) {
   return arr;
 }
 
+function getNextShift(shiftObj) {
+  const arr = entriesArr(shiftObj).filter(e => e.d);
+  if (arr.length === 0) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const upcoming = arr.filter(e => e.d >= today).sort((a, b) => a.d.localeCompare(b.d));
+  if (upcoming.length > 0) return upcoming[0];
+  const past = arr.slice().sort((a, b) => b.d.localeCompare(a.d));
+  return past[0];
+}
+
 function renderDash() {
   const ids = Object.keys(regionsData).sort();
   let html = `<div class="section" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
@@ -213,8 +223,7 @@ function renderDash() {
     const r = regionsData[id];
     const negCount = visibleEntries(r.negLog).length;
     const guideCount = visibleEntries(r.guide).length;
-    const shiftEntries = entriesArr(r.shift);
-    const nextShift = shiftEntries.length ? shiftEntries[shiftEntries.length - 1] : null;
+    const nextShift = getNextShift(r.shift);
     html += `<div class="card ${r.flag ? "flag" : ""}" onclick="openDetail('${id}')">
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <span class="title">${r.name}</span>
@@ -258,11 +267,16 @@ function openDetail(id) {
   renderDetail(id);
 }
 
+function familyNameOnly(name) {
+  if (!name) return "";
+  return name.trim().split(/\s+/)[0];
+}
+
 function renderDetail(id) {
   currentRegion = id;
   const r = regionsData[id];
   if (!r) return;
-  const myName = (auth.currentUser && auth.currentUser.displayName) || "";
+  const myName = familyNameOnly((auth.currentUser && auth.currentUser.displayName) || "");
   let html = `
     <div class="form-row" style="margin-bottom:6px;">
       <input class="name-edit" id="region-name" value="${r.name}" style="flex:1;">
@@ -343,13 +357,6 @@ function updateFlag(id, val) {
 
 function addEntry(regionId, field, inputIds) {
   const values = inputIds.map(iid => document.getElementById(iid).value.trim());
-  if (values.some(v => !v)) {
-    const errId = field + "-error";
-    const errEl = document.getElementById(errId);
-    errEl.textContent = "すべての項目を入力してください";
-    errEl.style.display = "block";
-    return;
-  }
   const entry = { ts: Date.now() };
   if (field === "shift") {
     entry.d = values[0]; entry.who = values[1];
@@ -357,7 +364,7 @@ function addEntry(regionId, field, inputIds) {
     entry.d = values[0]; entry.who = values[1]; entry.text = values[2];
   }
   db.ref("regions/" + regionId + "/" + field).push(entry);
-  inputIds.forEach(iid => document.getElementById(iid).value = "");
+  inputIds.forEach(iid => { if (!iid.endsWith("-who")) document.getElementById(iid).value = ""; });
 }
 
 function renderMeeting() {
