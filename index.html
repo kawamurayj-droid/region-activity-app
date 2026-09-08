@@ -125,6 +125,7 @@ auth.onAuthStateChanged(user => {
 
 // ==== アプリ本体 ====
 let regionsData = {};
+let meetingNotesData = {};
 let currentRegion = null;
 let appInitialized = false;
 
@@ -148,6 +149,11 @@ function initApp() {
     renderDash();
     renderMeeting();
     if (currentRegion && regionsData[currentRegion]) renderDetail(currentRegion);
+  });
+
+  db.ref("meetingNotes").on("value", snap => {
+    meetingNotesData = snap.val() || {};
+    renderMeeting();
   });
 
   document.getElementById("tab-dash").onclick = () => showTab("dash");
@@ -212,7 +218,11 @@ function renderDetail(id) {
   const r = regionsData[id];
   if (!r) return;
   let html = `
-    <input class="name-edit" id="region-name" value="${r.name}" onchange="updateName('${id}', this.value)">
+    <div class="form-row" style="margin-bottom:6px;">
+      <input class="name-edit" id="region-name" value="${r.name}" style="flex:1;">
+      <button onclick="updateName('${id}')">地域名を保存</button>
+    </div>
+    <p id="name-error" class="error-text" style="display:none;"></p>
     <div style="margin-bottom:14px;">
       <select id="status-select" onchange="updateStatus('${id}', this.value)">
         <option ${r.status === "未着手" ? "selected" : ""}>未着手</option>
@@ -260,9 +270,20 @@ function renderDetail(id) {
   document.getElementById("detail-content").innerHTML = html;
 }
 
-function updateName(id, val) {
-  if (!val.trim()) return;
-  db.ref("regions/" + id + "/name").set(val.trim());
+function updateName(id) {
+  const val = document.getElementById("region-name").value.trim();
+  const errEl = document.getElementById("name-error");
+  if (!val) {
+    errEl.textContent = "地域名を入力してください";
+    errEl.style.display = "block";
+    return;
+  }
+  db.ref("regions/" + id + "/name").set(val)
+    .then(() => { errEl.style.display = "none"; })
+    .catch(err => {
+      errEl.textContent = "保存に失敗しました: " + err.message;
+      errEl.style.display = "block";
+    });
 }
 function updateStatus(id, val) {
   db.ref("regions/" + id + "/status").set(val);
@@ -292,11 +313,19 @@ function addEntry(regionId, field, inputIds) {
 
 function renderMeeting() {
   const ids = Object.keys(regionsData).sort().filter(id => regionsData[id].flag);
-  let html = '<p style="font-size:13px; color:#666; margin-bottom:12px;">前回打ち合わせ以降の要対応地域</p>';
+  let html = '<div class="section"><p style="font-size:13px; color:#666; margin:0 0 8px;">打ち合わせメモを追加</p>';
+  html += `<div class="form-row">
+      <input id="meeting-date" type="date" style="width:150px;">
+      <input id="meeting-text" placeholder="自由記述" style="flex:1; min-width:200px;">
+      <button onclick="addMeetingNote()">追加</button>
+    </div>
+    <p id="meeting-error" class="error-text" style="display:none;"></p></div>`;
+
+  html += '<p style="font-size:13px; color:#666; margin-bottom:12px;">前回打ち合わせ以降の要対応地域</p>';
   if (ids.length === 0) {
     html += '<p style="font-size:13px; color:#999;">現在「要相談」フラグの地域はありません</p>';
   } else {
-    html += '<div style="display:flex; flex-direction:column; gap:8px;">';
+    html += '<div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">';
     ids.forEach(id => {
       const r = regionsData[id];
       const negCount = r.negLog ? Object.keys(r.negLog).length : 0;
@@ -309,7 +338,37 @@ function renderMeeting() {
     });
     html += "</div>";
   }
+
+  const notes = Object.values(meetingNotesData).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  html += '<p style="font-size:13px; color:#666; margin-bottom:8px;">打ち合わせメモ履歴</p>';
+  if (notes.length === 0) {
+    html += '<p style="font-size:13px; color:#999;">メモはまだありません</p>';
+  } else {
+    html += '<div style="display:flex; flex-direction:column; gap:6px;">';
+    notes.forEach(n => {
+      html += `<p class="entry">${n.date || ""} ／ ${n.text}</p>`;
+    });
+    html += "</div>";
+  }
+
   document.getElementById("panel-meeting").innerHTML = html;
+}
+
+function addMeetingNote() {
+  const date = document.getElementById("meeting-date").value;
+  const text = document.getElementById("meeting-text").value.trim();
+  const errEl = document.getElementById("meeting-error");
+  if (!date || !text) {
+    errEl.textContent = "日付と内容の両方を入力してください";
+    errEl.style.display = "block";
+    return;
+  }
+  db.ref("meetingNotes").push({ date, text, ts: Date.now() })
+    .then(() => { errEl.style.display = "none"; })
+    .catch(err => {
+      errEl.textContent = "保存に失敗しました: " + err.message;
+      errEl.style.display = "block";
+    });
 }
 
 function showTab(name) {
