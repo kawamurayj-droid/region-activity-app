@@ -52,6 +52,7 @@
     <nav>
       <button id="tab-dash" class="active">ダッシュボード</button>
       <button id="tab-detail">地域別詳細</button>
+      <button id="tab-shift">引率シフト一覧</button>
       <button id="tab-meeting">打ち合わせ用まとめ</button>
     </nav>
     <div id="panel-dash"></div>
@@ -59,6 +60,7 @@
       <select id="region-select" style="margin-bottom:12px; padding:6px;"></select>
       <div id="detail-content"></div>
     </div>
+    <div id="panel-shift" style="display:none;"></div>
     <div id="panel-meeting" style="display:none;"></div>
   </div>
 </div>
@@ -126,6 +128,8 @@ auth.onAuthStateChanged(user => {
 // ==== アプリ本体 ====
 let regionsData = {};
 let meetingNotesData = {};
+let lastMeetingDate = null;
+let filterMode = false;
 let currentRegion = null;
 let appInitialized = false;
 
@@ -138,7 +142,7 @@ function initApp() {
     if (!snap.exists()) {
       const seed = {};
       for (let i = 1; i <= 8; i++) {
-        seed["r" + i] = { name: "地域" + i, status: "未着手", flag: false };
+        seed["r" + i] = { name: "地域" + i, negStatus: "未着手", guideStatus: "未実施", flag: false };
       }
       regionsRef.set(seed);
     }
@@ -148,6 +152,7 @@ function initApp() {
     regionsData = snap.val() || {};
     renderDash();
     renderMeeting();
+    renderShiftOverview();
     if (currentRegion && regionsData[currentRegion]) renderDetail(currentRegion);
   });
 
@@ -156,30 +161,58 @@ function initApp() {
     renderMeeting();
   });
 
+  db.ref("settings/lastMeetingDate").on("value", snap => {
+    lastMeetingDate = snap.val() || null;
+    renderDash();
+    if (currentRegion) renderDetail(currentRegion);
+  });
+
   document.getElementById("tab-dash").onclick = () => showTab("dash");
   document.getElementById("tab-detail").onclick = () => showTab("detail");
+  document.getElementById("tab-shift").onclick = () => { showTab("shift"); renderShiftOverview(); };
   document.getElementById("tab-meeting").onclick = () => showTab("meeting");
   document.getElementById("region-select").onchange = e => renderDetail(e.target.value);
 }
 
-function statusColor(s) {
-  if (s === "合意済") return "#0f6e56";
-  if (s === "調整中") return "#854f0b";
-  return "#a32d2d";
+function statusColorByOptions(options, value) {
+  const idx = options.indexOf(value);
+  const colors = ["#a32d2d", "#854f0b", "#0f6e56"];
+  return colors[idx] !== undefined ? colors[idx] : "#666";
 }
+const NEG_STATUS_OPTIONS = ["未着手", "調整中", "合意済"];
+const GUIDE_STATUS_OPTIONS = ["未実施", "要フォロー", "順調"];
 
 function entriesArr(obj) {
   if (!obj) return [];
   return Object.entries(obj).map(([k, v]) => ({ id: k, ...v })).sort((a, b) => (a.ts || 0) - (b.ts || 0));
 }
 
+function visibleEntries(obj) {
+  let arr = entriesArr(obj);
+  if (filterMode && lastMeetingDate) {
+    const cutoff = new Date(lastMeetingDate).getTime();
+    arr = arr.filter(e => (e.ts || 0) >= cutoff);
+  }
+  return arr;
+}
+
 function renderDash() {
   const ids = Object.keys(regionsData).sort();
-  let html = '<div class="grid">';
+  let html = `<div class="section" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+    <label style="font-size:13px;">前回打ち合わせ日：
+      <input id="last-meeting-date-input" type="date" value="${lastMeetingDate || ""}" style="margin-left:4px;">
+    </label>
+    <button onclick="saveLastMeetingDate()">保存</button>
+    <label style="font-size:13px;">
+      <input type="checkbox" id="filter-toggle" ${filterMode ? "checked" : ""} onchange="toggleFilterMode(this.checked)">
+      それ以降に追加された項目のみ表示
+    </label>
+  </div>`;
+  html += '<div class="grid">';
   ids.forEach(id => {
     const r = regionsData[id];
-    const negCount = r.negLog ? Object.keys(r.negLog).length : 0;
-    const guideCount = r.guide ? Object.keys(r.guide).length : 0;
+    const negCount = visibleEntries(r.negLog).length;
+    const guideCount = visibleEntries(r.guide).length;
     const shiftEntries = entriesArr(r.shift);
     const nextShift = shiftEntries.length ? shiftEntries[shiftEntries.length - 1] : null;
     html += `<div class="card ${r.flag ? "flag" : ""}" onclick="openDetail('${id}')">
@@ -187,9 +220,9 @@ function renderDash() {
         <span class="title">${r.name}</span>
         ${r.flag ? '<span class="badge">要相談</span>' : ""}
       </div>
-      <p>対外交渉(${negCount}件): <span style="color:${statusColor(r.status)}; font-weight:600;">${r.status}</span></p>
+      <p>対外交渉(${negCount}件): <span style="color:${statusColorByOptions(NEG_STATUS_OPTIONS, r.negStatus || "未着手")}; font-weight:600;">${r.negStatus || "未着手"}</span></p>
       <p>次回引率: ${nextShift ? nextShift.d + " " + nextShift.who : "未定"}</p>
-      <p>学生指導: ${guideCount}件</p>
+      <p>学生指導(${guideCount}件): <span style="color:${statusColorByOptions(GUIDE_STATUS_OPTIONS, r.guideStatus || "未実施")}; font-weight:600;">${r.guideStatus || "未実施"}</span></p>
     </div>`;
   });
   html += "</div>";
@@ -201,8 +234,20 @@ function renderDash() {
   if (ids.includes(prev)) sel.value = prev;
 }
 
+function saveLastMeetingDate() {
+  const val = document.getElementById("last-meeting-date-input").value;
+  if (!val) return;
+  db.ref("settings/lastMeetingDate").set(val);
+}
+
+function toggleFilterMode(val) {
+  filterMode = val;
+  renderDash();
+  if (currentRegion) renderDetail(currentRegion);
+}
+
 function listBlock(obj, fmt) {
-  const arr = entriesArr(obj);
+  const arr = visibleEntries(obj);
   if (arr.length === 0) return '<p class="entry" style="color:#999;">記録なし</p>';
   return arr.map(e => `<p class="entry">${fmt(e)}</p>`).join("");
 }
@@ -217,6 +262,7 @@ function renderDetail(id) {
   currentRegion = id;
   const r = regionsData[id];
   if (!r) return;
+  const myName = (auth.currentUser && auth.currentUser.displayName) || "";
   let html = `
     <div class="form-row" style="margin-bottom:6px;">
       <input class="name-edit" id="region-name" value="${r.name}" style="flex:1;">
@@ -224,20 +270,19 @@ function renderDetail(id) {
     </div>
     <p id="name-error" class="error-text" style="display:none;"></p>
     <div style="margin-bottom:14px;">
-      <select id="status-select" onchange="updateStatus('${id}', this.value)">
-        <option ${r.status === "未着手" ? "selected" : ""}>未着手</option>
-        <option ${r.status === "調整中" ? "selected" : ""}>調整中</option>
-        <option ${r.status === "合意済" ? "selected" : ""}>合意済</option>
-      </select>
-      <label class="flagcheck"><input type="checkbox" ${r.flag ? "checked" : ""} onchange="updateFlag('${id}', this.checked)"> 要相談フラグ</label>
+      <label class="flagcheck" style="margin-left:0;"><input type="checkbox" ${r.flag ? "checked" : ""} onchange="updateFlag('${id}', this.checked)"> 要相談フラグ</label>
     </div>
 
     <div class="section">
-      <p style="font-size:13px; color:#666;">対外交渉ログ</p>
+      <p style="font-size:13px; color:#666;">対外交渉ログ
+        <select id="neg-status-select" style="margin-left:8px;" onchange="updateStatus('${id}','negStatus', this.value)">
+          ${NEG_STATUS_OPTIONS.map(o => `<option ${(r.negStatus || "未着手") === o ? "selected" : ""}>${o}</option>`).join("")}
+        </select>
+      </p>
       <div>${listBlock(r.negLog, e => `${e.d} ／ ${e.who} ／ ${e.text}`)}</div>
       <div class="form-row">
         <input id="neg-date" placeholder="日付 例: 9/10" style="width:110px;">
-        <input id="neg-who" placeholder="担当者" style="width:90px;">
+        <input id="neg-who" placeholder="担当者" value="${myName}" style="width:90px;">
         <input id="neg-text" placeholder="内容" style="flex:1; min-width:160px;">
         <button onclick="addEntry('${id}','negLog',['neg-date','neg-who','neg-text'])">追加</button>
       </div>
@@ -248,19 +293,23 @@ function renderDetail(id) {
       <p style="font-size:13px; color:#666;">引率シフト</p>
       <div>${listBlock(r.shift, e => `${e.d} ／ ${e.who}`)}</div>
       <div class="form-row">
-        <input id="shift-date" placeholder="日付 例: 10/4" style="width:110px;">
-        <input id="shift-who" placeholder="担当者" style="width:90px;">
+        <input id="shift-date" type="date" style="width:150px;">
+        <input id="shift-who" placeholder="担当者" value="${myName}" style="width:90px;">
         <button onclick="addEntry('${id}','shift',['shift-date','shift-who'])">追加</button>
       </div>
       <p id="shift-error" class="error-text" style="display:none;"></p>
     </div>
 
     <div class="section">
-      <p style="font-size:13px; color:#666;">学生指導記録</p>
+      <p style="font-size:13px; color:#666;">学生指導記録
+        <select id="guide-status-select" style="margin-left:8px;" onchange="updateStatus('${id}','guideStatus', this.value)">
+          ${GUIDE_STATUS_OPTIONS.map(o => `<option ${(r.guideStatus || "未実施") === o ? "selected" : ""}>${o}</option>`).join("")}
+        </select>
+      </p>
       <div>${listBlock(r.guide, e => `${e.d} ／ ${e.who} ／ ${e.text}`)}</div>
       <div class="form-row">
         <input id="guide-date" placeholder="日付 例: 9/10" style="width:110px;">
-        <input id="guide-who" placeholder="担当者" style="width:90px;">
+        <input id="guide-who" placeholder="担当者" value="${myName}" style="width:90px;">
         <input id="guide-text" placeholder="内容" style="flex:1; min-width:160px;">
         <button onclick="addEntry('${id}','guide',['guide-date','guide-who','guide-text'])">追加</button>
       </div>
@@ -285,8 +334,8 @@ function updateName(id) {
       errEl.style.display = "block";
     });
 }
-function updateStatus(id, val) {
-  db.ref("regions/" + id + "/status").set(val);
+function updateStatus(id, field, val) {
+  db.ref("regions/" + id + "/" + field).set(val);
 }
 function updateFlag(id, val) {
   db.ref("regions/" + id + "/flag").set(val);
@@ -314,10 +363,10 @@ function addEntry(regionId, field, inputIds) {
 function renderMeeting() {
   const ids = Object.keys(regionsData).sort().filter(id => regionsData[id].flag);
   let html = '<div class="section"><p style="font-size:13px; color:#666; margin:0 0 8px;">打ち合わせメモを追加</p>';
-  html += `<div class="form-row">
-      <input id="meeting-date" type="date" style="width:150px;">
-      <input id="meeting-text" placeholder="自由記述" style="flex:1; min-width:200px;">
-      <button onclick="addMeetingNote()">追加</button>
+  html += `<div class="form-row" style="flex-direction:column; align-items:stretch;">
+      <input id="meeting-date" type="date" style="width:160px;">
+      <textarea id="meeting-text" rows="4" placeholder="自由記述" style="width:100%; margin-top:6px; font-family:inherit; font-size:13px; padding:8px; border:1px solid #ccc; border-radius:6px; resize:vertical; box-sizing:border-box;"></textarea>
+      <button onclick="addMeetingNote()" style="margin-top:6px; align-self:flex-start;">追加</button>
     </div>
     <p id="meeting-error" class="error-text" style="display:none;"></p></div>`;
 
@@ -344,9 +393,12 @@ function renderMeeting() {
   if (notes.length === 0) {
     html += '<p style="font-size:13px; color:#999;">メモはまだありません</p>';
   } else {
-    html += '<div style="display:flex; flex-direction:column; gap:6px;">';
+    html += '<div style="display:flex; flex-direction:column; gap:10px;">';
     notes.forEach(n => {
-      html += `<p class="entry">${n.date || ""} ／ ${n.text}</p>`;
+      html += `<div class="section" style="margin-bottom:0;">
+        <p style="font-size:12px; color:#999; margin:0 0 4px;">${n.date || ""}</p>
+        <p style="font-size:13px; margin:0; white-space:pre-wrap;">${n.text}</p>
+      </div>`;
     });
     html += "</div>";
   }
@@ -371,8 +423,39 @@ function addMeetingNote() {
     });
 }
 
+function renderShiftOverview() {
+  let all = [];
+  Object.keys(regionsData).forEach(id => {
+    const r = regionsData[id];
+    entriesArr(r.shift).forEach(e => {
+      if (e.d) all.push({ region: r.name, date: e.d, who: e.who });
+    });
+  });
+  const byDate = {};
+  all.forEach(e => { (byDate[e.date] = byDate[e.date] || []).push(e); });
+  const dates = Object.keys(byDate).sort();
+  let html = "";
+  if (dates.length === 0) {
+    html = '<p style="font-size:13px; color:#999;">引率予定がまだ登録されていません</p>';
+  } else {
+    html = '<div style="display:flex; flex-direction:column; gap:8px;">';
+    dates.forEach(date => {
+      const entries = byDate[date];
+      const conflict = entries.length > 1;
+      html += `<div class="section" style="margin-bottom:0; ${conflict ? "border:2px solid #d85a30;" : ""}">
+        <p style="font-weight:600; font-size:14px; margin:0 0 4px;">${date} ${conflict ? '<span class="badge">重複あり</span>' : ""}</p>`;
+      entries.forEach(e => {
+        html += `<p class="entry">${e.region} ／ ${e.who}</p>`;
+      });
+      html += "</div>";
+    });
+    html += "</div>";
+  }
+  document.getElementById("panel-shift").innerHTML = html;
+}
+
 function showTab(name) {
-  ["dash", "detail", "meeting"].forEach(t => {
+  ["dash", "detail", "shift", "meeting"].forEach(t => {
     document.getElementById("panel-" + t).style.display = t === name ? "block" : "none";
     document.getElementById("tab-" + t).classList.toggle("active", t === name);
   });
