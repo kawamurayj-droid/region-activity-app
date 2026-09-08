@@ -25,6 +25,10 @@
   .badge { background:#faece7; color:#712b13; font-size:13px; padding:3px 10px; border-radius:8px; }
   .section { background:#fff; border-radius:10px; padding:16px; margin-bottom:14px; border:1px solid #eee; }
   .section p.entry { font-size:13px; margin:0 0 4px; }
+  .entry-row { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:2px 0; }
+  .entry-row p.entry { margin:0; flex:1; }
+  .del-btn { font-size:12px; color:#999; background:none; border:none; cursor:pointer; padding:2px 8px; flex-shrink:0; }
+  .del-btn:hover { color:#c0392b; }
   .form-row { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
   .form-row input, .form-row select { font-size:13px; padding:6px 8px; border:1px solid #ccc; border-radius:6px; }
   .form-row button { font-size:13px; padding:6px 12px; cursor:pointer; border:1px solid #888; border-radius:6px; background:#fff; }
@@ -255,10 +259,14 @@ function toggleFilterMode(val) {
   if (currentRegion) renderDetail(currentRegion);
 }
 
-function listBlock(obj, fmt) {
+function listBlock(regionId, field, obj, fmt) {
   const arr = visibleEntries(obj);
   if (arr.length === 0) return '<p class="entry" style="color:#999;">記録なし</p>';
-  return arr.map(e => `<p class="entry">${fmt(e)}</p>`).join("");
+  return arr.map(e => `<div class="entry-row"><p class="entry">${fmt(e)}</p><button class="del-btn" onclick="deleteEntry('${regionId}','${field}','${e.id}')">削除</button></div>`).join("");
+}
+
+function deleteEntry(regionId, field, entryId) {
+  db.ref("regions/" + regionId + "/" + field + "/" + entryId).remove();
 }
 
 function openDetail(id) {
@@ -293,7 +301,7 @@ function renderDetail(id) {
           ${NEG_STATUS_OPTIONS.map(o => `<option ${(r.negStatus || "未着手") === o ? "selected" : ""}>${o}</option>`).join("")}
         </select>
       </p>
-      <div>${listBlock(r.negLog, e => `${e.d} ／ ${e.who} ／ ${e.text}`)}</div>
+      <div>${listBlock(id, "negLog", r.negLog, e => `${e.d} ／ ${e.who} ／ ${e.text}`)}</div>
       <div class="form-row">
         <input id="neg-date" placeholder="日付 例: 9/10" style="width:110px;">
         <input id="neg-who" placeholder="担当者" value="${myName}" style="width:90px;">
@@ -305,7 +313,7 @@ function renderDetail(id) {
 
     <div class="section">
       <p style="font-size:13px; color:#666;">引率シフト</p>
-      <div>${listBlock(r.shift, e => `${e.d} ／ ${e.who}`)}</div>
+      <div>${listBlock(id, "shift", r.shift, e => `${e.d} ／ ${e.who}`)}</div>
       <div class="form-row">
         <input id="shift-date" type="date" style="width:150px;">
         <input id="shift-who" placeholder="担当者" value="${myName}" style="width:90px;">
@@ -320,7 +328,7 @@ function renderDetail(id) {
           ${GUIDE_STATUS_OPTIONS.map(o => `<option ${(r.guideStatus || "未実施") === o ? "selected" : ""}>${o}</option>`).join("")}
         </select>
       </p>
-      <div>${listBlock(r.guide, e => `${e.d} ／ ${e.who} ／ ${e.text}`)}</div>
+      <div>${listBlock(id, "guide", r.guide, e => `${e.d} ／ ${e.who} ／ ${e.text}`)}</div>
       <div class="form-row">
         <input id="guide-date" placeholder="日付 例: 9/10" style="width:110px;">
         <input id="guide-who" placeholder="担当者" value="${myName}" style="width:90px;">
@@ -395,7 +403,7 @@ function renderMeeting() {
     html += "</div>";
   }
 
-  const notes = Object.values(meetingNotesData).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  const notes = Object.entries(meetingNotesData).map(([k, v]) => ({ id: k, ...v })).sort((a, b) => (b.ts || 0) - (a.ts || 0));
   html += '<p style="font-size:13px; color:#666; margin-bottom:8px;">打ち合わせメモ履歴</p>';
   if (notes.length === 0) {
     html += '<p style="font-size:13px; color:#999;">メモはまだありません</p>';
@@ -403,7 +411,10 @@ function renderMeeting() {
     html += '<div style="display:flex; flex-direction:column; gap:10px;">';
     notes.forEach(n => {
       html += `<div class="section" style="margin-bottom:0;">
-        <p style="font-size:12px; color:#999; margin:0 0 4px;">${n.date || ""}</p>
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+          <p style="font-size:12px; color:#999; margin:0 0 4px;">${n.date || ""}</p>
+          <button class="del-btn" onclick="deleteMeetingNote('${n.id}')">削除</button>
+        </div>
         <p style="font-size:13px; margin:0; white-space:pre-wrap;">${n.text}</p>
       </div>`;
     });
@@ -411,6 +422,10 @@ function renderMeeting() {
   }
 
   document.getElementById("panel-meeting").innerHTML = html;
+}
+
+function deleteMeetingNote(noteId) {
+  db.ref("meetingNotes/" + noteId).remove();
 }
 
 function addMeetingNote() {
